@@ -1,0 +1,18 @@
+# Build & Simulation Artifacts
+build/*
+!build/.gitkeep
+*.vvp
+*.vcd
+*.log
+*.gtkw
+
+# Python Cache
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# OS & Editor Files
+.DS_Store
+Thumbs.db
+.vscode/
