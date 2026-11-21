@@ -1,0 +1,15 @@
+# synth/synth_xilinx.ys - Yosys Xilinx 7-Series (Artix-7) LUT & FF Synthesis
+read_verilog rtl/mac_pe.v
+read_verilog rtl/systolic_array_4x4.v
+read_verilog rtl/relu_unit.v
+read_verilog rtl/softermax_unit.v
+read_verilog rtl/argmax_unit.v
+read_verilog rtl/instruction_decoder.v
+read_verilog rtl/uart_rx.v
+read_verilog rtl/uart_tx.v
+read_verilog rtl/uart_host_bridge.v
+read_verilog rtl/ai_chip_synth_top.v
+read_verilog rtl/ai_chip_top.v
+
+synth_xilinx -top ai_chip_top -family xc7
+stat

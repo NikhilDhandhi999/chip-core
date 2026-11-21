@@ -4,7 +4,6 @@ build/*
 *.vvp
 *.vcd
 *.log
-*.gtkw
 
 # Python Cache
 __pycache__/

@@ -1,8 +1,7 @@
 """
 compiler/analyze_silicon.py
-Gate-Level Synthesis & Silicon PPA Report for chip-core (v7.0)
-Reads real Yosys synthesis stats from `build/yosys_synth.log` if Yosys ran,
-otherwise falls back to exact architectural gate-level accounting.
+Evidence-Separated Gate-Level Synthesis & Silicon PPA Report (chip-core v7.2)
+Parses Yosys 0.71+ synthesis logs (top-level ai_chip_top summary) and simulation telemetry.
 """
 
 import os
@@ -14,82 +13,83 @@ def parse_telemetry():
         return None
     with open(path, "r", encoding="utf-8") as f:
         parts = f.read().strip().split()
-        if len(parts) >= 5:
-            return [int(x) for x in parts[:5]]
+        if len(parts) >= 8:
+            return [int(x) for x in parts[:8]]
     return None
 
-def parse_yosys_stats():
-    log_path = "build/yosys_synth.log"
+def get_top_stat_block(log_path):
     if not os.path.exists(log_path):
         return None
     with open(log_path, "r", encoding="utf-8", errors="ignore") as f:
         text = f.read()
-    m_cells = re.search(r"Number of cells:\s+(\d+)", text)
-    m_wires = re.search(r"Number of wires:\s+(\d+)", text)
+    blocks = re.split(r"===\s+[^=]+\s+===", text)
+    return blocks[-1] if blocks else text
+
+def parse_yosys_cmos():
+    block = get_top_stat_block("build/yosys_synth.log")
+    if not block:
+        return None
+    m_cells = re.search(r"(\d+)\s+cells", block)
+    m_wires = re.search(r"(\d+)\s+wires", block)
+    dff_matches = re.findall(r"(\d+)\s+\$_[A-Z]*DFF[^\s]*", block)
+    total_dffs = sum(int(x) for x in dff_matches) if dff_matches else 0
     if m_cells:
-        cells = int(m_cells.group(1))
-        wires = int(m_wires.group(1)) if m_wires else 0
-        return cells, wires
+        return int(m_cells.group(1)), (int(m_wires.group(1)) if m_wires else 0), total_dffs
+    return None
+
+def parse_yosys_xilinx():
+    block = get_top_stat_block("build/yosys_xilinx.log")
+    if not block:
+        return None
+    lut_matches = re.findall(r"(\d+)\s+LUT[1-6]", block)
+    fd_matches = re.findall(r"(\d+)\s+FD[A-Z]+", block)
+    dsp_matches = re.findall(r"(\d+)\s+DSP48E1", block)
+    if lut_matches:
+        return (
+            sum(int(x) for x in lut_matches),
+            sum(int(x) for x in fd_matches),
+            sum(int(x) for x in dsp_matches),
+        )
     return None
 
 def main():
     telem = parse_telemetry()
-    yosys_res = parse_yosys_stats()
-
-    pe_count = 16
-    pe_ff_each = 48
-    pe_gates_ternary_each = 310
-
-    relu_gates = 16 * 85
-    softermax_gates = 4 * 520
-    argmax_gates = 4 * 290
-    decoder_gates = 180
-    uart_bridge_ff = 160
-    uart_bridge_gates = 920
-
-    sram_bits = (256 + 128) * 8
-    sram_decode_gates = 2650
-    ctrl_ff = 741
-    ctrl_gates = 1680
-
-    total_ffs = (pe_count * pe_ff_each) + sram_bits + ctrl_ff + uart_bridge_ff
-    total_gates = (
-        pe_count * pe_gates_ternary_each
-        + relu_gates
-        + softermax_gates
-        + argmax_gates
-        + decoder_gates
-        + uart_bridge_gates
-        + sram_decode_gates
-        + ctrl_gates
-    )
-
-    fpga_luts = int(total_gates / 2.4)
-    area_28nm_mm2 = total_gates / 2_000_000.0
-    area_4nm_um2  = (total_gates / 45_000_000.0) * 1_000_000.0
+    cmos_stats = parse_yosys_cmos()
+    xilinx_stats = parse_yosys_xilinx()
 
     print("==========================================================================")
-    print("  CHIP-CORE v7.0 - GATE-LEVEL SYNTHESIS & SILICON PPA REPORT")
+    print("  CHIP-CORE v7.2 - EVIDENCE-SEPARATED PPA & VERIFICATION REPORT")
     print("==========================================================================")
     print("Top Synthesizable Module : rtl/ai_chip_top.v (UART Bridge + Tensor ISA SoC)")
-    if yosys_res:
-        y_cells, y_wires = yosys_res
-        print(f"Yosys Real Synthesis     : {y_cells:,} CMOS logic cells | {y_wires:,} internal nets")
-        print("Gate-Level Netlist       : build/ai_chip_netlist.v (Verified)")
+    print("")
+    print("[A] DIRECTLY MEASURED SIMULATION & SYNTHESIS METRICS")
+    print("--------------------------------------------------------------------------")
+
+    if cmos_stats:
+        cells, wires, dffs = cmos_stats
+        print(f"  Yosys CMOS Cells       : {cells:,} mapped logic & sequential cells (measured)")
+        print(f"  Yosys Flip-Flops       : {dffs:,} DFF primitives (measured)")
+        print(f"  Yosys Internal Nets    : {wires:,} wires (measured)")
     else:
-        print("Yosys Gate-Level Synth   : Ready (run `powershell -File synth/install_yosys.ps1` for real CMOS netlist)")
-    print(f"Total Sequential FFs     : {total_ffs:,} registers")
-    print(f"Logic Gate Equivalent    : {total_gates:,} NAND2-equivalent gates")
-    print(f"Xilinx Artix-7 Footprint : ~{fpga_luts:,} 6-LUTs (<25% of Digilent Arty A7-35T)")
-    print(f"Estimated Silicon Area   : {area_28nm_mm2:.4f} mm^2 @ 28nm  |  {area_4nm_um2:.1f} um^2 @ 4nm")
+        print("  Yosys CMOS Synthesis   : Not yet run (see build/yosys_synth.log)")
+
+    if xilinx_stats:
+        luts, fds, dsps = xilinx_stats
+        print(f"  Xilinx 7-Series LUTs   : {luts:,} LUTs + {fds:,} FFs + {dsps} DSP48E1 (measured via Yosys)")
+    else:
+        print("  Xilinx 7-Series LUTs   : Not yet run (see build/yosys_xilinx.log)")
+
     if telem:
-        tx_bytes, cycles, skips, bypasses, match_flag = telem
-        print("--------------------------------------------------------------------------")
-        print("  END-TO-END UART STREAM -> SILICON EXECUTION -> UART READBACK")
-        print("--------------------------------------------------------------------------")
-        print(f"UART Host Bytes Streamed : {tx_bytes} bytes over serial RX")
-        print(f"Core Execution Cycles    : {cycles} cycles | Zero-Skips: {skips} | Ternary Ops: {bypasses}")
-        print(f"UART Readback Match      : {'100% PASS' if match_flag else 'FAIL'}")
+        attn_cyc, attn_skip, attn_byp, attn_ok, vis_cyc, vis_skip, vis_byp, vis_ok = telem
+        print(f"  Workload 1 (Attention) : {attn_cyc} cycles | {attn_skip} zero-skips | {attn_byp} ternary ops | {'PASS' if attn_ok else 'FAIL'}")
+        print(f"  Workload 2 (Vision)    : {vis_cyc} cycles | {vis_skip} zero-skips | {vis_byp} ternary ops | {'PASS' if vis_ok else 'FAIL'}")
+
+    print("")
+    print("[B] ANALYTICAL ARCHITECTURAL ESTIMATES (REQUIRES PHYSICAL / STA / POWER TOOLS)")
+    print("--------------------------------------------------------------------------")
+    print("  Target Fmax (650 MHz)  : Analytical estimate @ 28nm (requires post-P&R STA)")
+    print("  Silicon Area (28nm)    : ~0.0075 mm^2 analytical cell density estimate (requires PDK layout)")
+    print("  Ternary Energy Savings : Analytical MAC-vs-Add switching model (requires VCD power sim)")
     print("==========================================================================")
 
 if __name__ == "__main__":

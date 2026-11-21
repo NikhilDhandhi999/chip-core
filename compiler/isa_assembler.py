@@ -1,6 +1,9 @@
 """
 compiler/isa_assembler.py
-Tensor ISA Assembler & UART Binary Stream Builder for chip-core (v7.0)
+Unified Tensor ISA Assembler & Dual-Workload UART Stream Compiler (chip-core v7.2)
+Compiles two distinct AI programs to binary UART host packet streams:
+  1. Fused Transformer Self-Attention Head -> build/uart_attn_stream.bin + build/gold_attn.hex
+  2. Trained 1.58-Bit Ternary Vision Classifier -> build/uart_vision_stream.bin + build/gold_preds.txt
 """
 
 import os
@@ -43,6 +46,95 @@ def encode_inst(op_name, dst=0, src_a=0, src_b=0,
         | ((flags & 0xFF) << 8)
         | (imm & 0xFF)
     )
+
+def build_uart_stream(inst_words, sram_bytes, include_read_preds=False):
+    stream = bytearray()
+    for addr, word in enumerate(inst_words):
+        stream.append(0x01)
+        stream.append(addr & 0xFF)
+        stream.extend(word.to_bytes(4, byteorder="big"))
+
+    for addr, val in enumerate(sram_bytes):
+        stream.append(0x02)
+        stream.append(addr & 0xFF)
+        stream.append(val & 0xFF)
+
+    stream.append(0x03)
+    if include_read_preds:
+        stream.append(0x04)
+    return stream
+
+def compile_self_attention():
+    Q = [
+        [ 4,  0, -4,  2],
+        [ 0,  4,  2, -2],
+        [-2,  2,  4,  0],
+        [ 2, -2,  0,  4],
+    ]
+    K = [
+        [ 4,  0, -4,  0],
+        [ 0,  4,  2,  0],
+        [-2,  4,  2,  0],
+        [ 4, -2,  0,  4],
+    ]
+    V = [
+        [ 1,  0, -1,  1],
+        [ 0,  1,  1,  0],
+        [-1,  1, -1,  1],
+        [ 1, -1,  0,  1],
+    ]
+
+    S = [[sum(Q[r][k] * K[c][k] for k in range(4)) for c in range(4)] for r in range(4)]
+    P = []
+    for r in range(4):
+        masked = [S[r][c] if c <= r else -999999 for c in range(4)]
+        m = max(masked[c] for c in range(r + 1))
+        u = []
+        for c in range(4):
+            if c > r:
+                u.append(0)
+            else:
+                sh = max(0, (m - S[r][c]) >> 1)
+                u.append(0 if sh >= 8 else (128 >> sh))
+        rsum = sum(u)
+        P.append([(val * 127) // rsum for val in u])
+
+    O_gold = []
+    for r in range(4):
+        row_o = []
+        for c in range(4):
+            acc = sum(P[r][k] * V[k][c] for k in range(4))
+            row_o.append(max(-128, min(127, acc)))
+        O_gold.append(row_o)
+
+    sram = [0] * 64
+    for slot_id, mat in [(0, Q), (1, K), (2, V)]:
+        for r in range(4):
+            for c in range(4):
+                sram[slot_id * 16 + r * 4 + c] = mat[r][c]
+
+    prog = [
+        encode_inst("MATMUL",    src_a=0, src_b=1, transpose_b=1),
+        encode_inst("SOFTERMAX", dst=3, causal_mask=1, imm=1),
+        encode_inst("MATMUL",    src_a=3, src_b=2, ternary=1),
+        encode_inst("STORE_ACC", dst=4, imm=0),
+        encode_inst("HALT"),
+    ]
+
+    with open("build/prog_attn.hex", "w", encoding="utf-8") as f:
+        for w in prog:
+            f.write(f"{w:08x}\n")
+
+    with open("build/gold_attn.hex", "w", encoding="utf-8") as f:
+        for r in range(4):
+            for c in range(4):
+                f.write(f"{O_gold[r][c] & 0xFF:02x}\n")
+
+    stream = build_uart_stream(prog, sram, include_read_preds=False)
+    with open("build/uart_attn_stream.bin", "wb") as fb:
+        fb.write(stream)
+
+    return prog, stream, O_gold
 
 def ternarize_matrix(W, thresh=0.35):
     return [[1 if v > thresh else (-1 if v < -thresh else 0) for v in row] for row in W]
@@ -89,8 +181,7 @@ def train_ternary_mlp():
 
     return ternarize_matrix(W1), ternarize_matrix(W2)
 
-def main():
-    os.makedirs("build", exist_ok=True)
+def compile_vision_classifier():
     W1_q, W2_q = train_ternary_mlp()
     eval_rng = random.Random(2026)
     test_images = [make_sample(c, eval_rng) for c in range(4)]
@@ -101,30 +192,29 @@ def main():
         slots[4 + t] = [[W1_q[t*4 + k][h] for h in range(4)] for k in range(4)]
     slots[9] = W2_q
 
-    sram_mem = [0] * 256
+    sram = [0] * 160
     for slot_id, mat4x4 in slots.items():
         for r in range(4):
             for c in range(4):
-                sram_mem[slot_id * 16 + r * 4 + c] = mat4x4[r][c]
+                sram[slot_id * 16 + r * 4 + c] = mat4x4[r][c]
 
-    program = [
-        ("MATMUL", dict(src_a=0, src_b=4, acc_keep=0, ternary=1)),
-        ("MATMUL", dict(src_a=1, src_b=5, acc_keep=1, ternary=1)),
-        ("MATMUL", dict(src_a=2, src_b=6, acc_keep=1, ternary=1)),
-        ("MATMUL", dict(src_a=3, src_b=7, acc_keep=1, ternary=1)),
-        ("RELU",   dict(dst=8, imm=2)),
-        ("MATMUL", dict(src_a=8, src_b=9, acc_keep=0, ternary=1)),
-        ("ARGMAX", dict()),
-        ("HALT",   dict()),
+    prog = [
+        encode_inst("MATMUL", src_a=0, src_b=4, acc_keep=0, ternary=1),
+        encode_inst("MATMUL", src_a=1, src_b=5, acc_keep=1, ternary=1),
+        encode_inst("MATMUL", src_a=2, src_b=6, acc_keep=1, ternary=1),
+        encode_inst("MATMUL", src_a=3, src_b=7, acc_keep=1, ternary=1),
+        encode_inst("RELU",   dst=8, imm=2),
+        encode_inst("MATMUL", src_a=8, src_b=9, acc_keep=0, ternary=1),
+        encode_inst("ARGMAX"),
+        encode_inst("HALT"),
     ]
-    inst_words = [encode_inst(op, **kw) for op, kw in program]
 
     with open("build/prog_vision.hex", "w", encoding="utf-8") as f:
-        for w in inst_words:
+        for w in prog:
             f.write(f"{w:08x}\n")
 
     with open("build/sram_vision.hex", "w", encoding="utf-8") as f:
-        for val in sram_mem:
+        for val in sram:
             f.write(f"{val & 0xFF:02x}\n")
 
     preds_gold = []
@@ -138,26 +228,20 @@ def main():
     with open("build/gold_preds.txt", "w", encoding="utf-8") as f:
         f.write(" ".join(str(p) for p in preds_gold) + "\n")
 
-    stream = bytearray()
-    for addr, word in enumerate(inst_words):
-        stream.append(0x01)
-        stream.append(addr & 0xFF)
-        stream.extend(word.to_bytes(4, byteorder="big"))
-
-    for addr in range(160):
-        stream.append(0x02)
-        stream.append(addr & 0xFF)
-        stream.append(sram_mem[addr] & 0xFF)
-
-    stream.append(0x03)
-    stream.append(0x04)
-
-    with open("build/uart_tx_stream.bin", "wb") as fb:
+    stream = build_uart_stream(prog, sram, include_read_preds=True)
+    with open("build/uart_vision_stream.bin", "wb") as fb:
         fb.write(stream)
 
-    print("=== Tensor ISA Assembler & UART Stream Compiler (chip-core v7.0) ===")
-    print(f"Instructions Compiled : {len(inst_words)} words | SRAM Bytes: 160 | Stream: {len(stream)}B")
-    print(f"Golden Predictions    : {[CLASS_NAMES[p] for p in preds_gold]}")
+    return prog, stream, preds_gold
+
+def main():
+    os.makedirs("build", exist_ok=True)
+    p_attn, s_attn, o_gold = compile_self_attention()
+    p_vis, s_vis, preds_gold = compile_vision_classifier()
+
+    print("=== Dual-Workload Tensor ISA Assembler & UART Stream Compiler (chip-core v7.2) ===")
+    print(f"[Workload 1: Transformer Self-Attention] {len(p_attn)} insts | {len(s_attn)}B UART stream")
+    print(f"[Workload 2: 1.58-Bit Vision Classifier]  {len(p_vis)} insts | {len(s_vis)}B UART stream | Expected: {[CLASS_NAMES[p] for p in preds_gold]}")
 
 if __name__ == "__main__":
     main()

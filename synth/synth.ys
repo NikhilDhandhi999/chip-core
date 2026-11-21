@@ -1,4 +1,4 @@
-# synth/synth.ys - Open-Source Yosys Gate-Level Synthesis Flow for chip-core v7.0
+# synth/synth.ys - Open-Source Yosys CMOS Gate-Level Synthesis Flow (chip-core v7.2)
 read_verilog rtl/mac_pe.v
 read_verilog rtl/systolic_array_4x4.v
 read_verilog rtl/relu_unit.v

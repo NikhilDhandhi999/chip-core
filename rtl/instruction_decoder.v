@@ -1,5 +1,5 @@
 // rtl/instruction_decoder.v
-// 32-Bit Tensor ISA Instruction Decoder for chip-core (v7.0)
+// 32-Bit Tensor ISA Instruction Decoder for chip-core (v7.2)
 
 module instruction_decoder (
     input  wire [31:0] inst_word,

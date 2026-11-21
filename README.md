@@ -1,11 +1,11 @@
-# `chip-core` — Custom 1.58-Bit Ternary & Transformer AI Accelerator SoC
+# `chip-core` — Programmable 1.58-Bit Ternary & Transformer AI Accelerator SoC
 
 [![RTL](https://img.shields.io/badge/RTL-Synthesizable_Verilog-blue.svg)]()
 [![ISA](https://img.shields.io/badge/ISA-32--Bit_Tensor_ISA-purple.svg)]()
 [![Precision](https://img.shields.io/badge/Compute-1.58--Bit_Ternary_%7B--1%2C0%2C%2B1%7D-green.svg)]()
-[![Interface](https://img.shields.io/badge/Host_I%2FO-8N1_UART_Serial_Bridge-orange.svg)]()
+[![Verification](https://img.shields.io/badge/Verification-Icarus_Verilog_%2B_Yosys-teal.svg)]()
 
-`chip-core` is an end-to-end, synthesizable **AI Accelerator System-on-Chip (SoC)** written in pure Verilog RTL with a custom Python Quantization-Aware Trainer, 32-Bit Tensor ISA Assembler, UART Host Serial Bridge, and Gate-Level Synthesis flow.
+`chip-core` is an end-to-end, synthesizable **AI Accelerator System-on-Chip (SoC)** written in pure Verilog RTL, accompanied by a Python quantization-aware trainer, 32-bit Tensor ISA assembler, `8N1` UART serial host bridge, cycle-accurate testbench, and open-source Yosys synthesis scripts.
 
 ---
 
@@ -13,7 +13,7 @@
 
 ```text
   Host PC (Python / PySerial)
-       │  8N1 UART Serial (WRITE_INST, WRITE_SRAM, RUN_EXEC, READ_PREDS)
+       │  8N1 UART Serial (0x01 WRITE_INST, 0x02 WRITE_SRAM, 0x03 RUN_EXEC, 0x04 READ_PREDS)
        ▼
 ┌────────────────────────────────────────────────────────────────────────────┐
 │  ai_chip_top (UART-Enabled Programmable AI SoC)                            │
@@ -41,43 +41,76 @@
 
 ---
 
-## Key Hardware Features
+## PPA & Verification Evidence Matrix
 
-1. **Dual-Mode Zero-Skipping Systolic Array (`rtl/mac_pe.v`, `rtl/systolic_array_4x4.v`):**
-   - Hardware zero-skipping gates idle MAC clocks whenever an activation or weight is `0` (**70.9% zero-skip rate** on vision workloads).
-   - **1.58-Bit Ternary Datapath (`{-1, 0, +1}`)** bypasses `8×8` multipliers completely using pure add/subtract logic (**13.0× lower compute energy** per batch).
-2. **32-Bit Tensor ISA & Instruction Decoder (`rtl/instruction_decoder.v`, `compiler/isa_assembler.py`):**
-   - Programmable fetch/decode/execute engine supporting `NOP`, `CLEAR_ACC`, `MATMUL` (with multi-tile accumulation `acc_keep` and zero-copy `transpose_b`), `RELU`, `SOFTERMAX`, `STORE_ACC`, `ARGMAX`, and `HALT`.
-   - Executes **Fused Transformer Self-Attention** (`34 cycles`) and a **Trained 1.58-Bit Ternary Vision Classifier** (`70 cycles`) on the exact same silicon core.
-3. **Fused Causal Softermax & Hardware Argmax (`rtl/softermax_unit.v`, `rtl/argmax_unit.v`):**
-   - Replaces floating-point `exp(x)` with base-2 bit-shifts (`2^(-delta) = 128 >> delta`) and autoregressive causal masking (`col > row`).
-   - Combinational comparator trees output winning class IDs directly on hardware pins.
-4. **Synthesizable 8N1 UART Serial Host Bridge (`rtl/uart_rx.v`, `rtl/uart_tx.v`, `rtl/uart_host_bridge.v`):**
-   - Streams instructions (`0x01`) and tensor data (`0x02`) from a host PC over serial RX, executes on silicon (`0x03`), and transmits predictions back over serial TX (`0x04`).
+To maintain strict engineering rigor, hardware metrics are separated into **directly measured tool outputs** (reproducible locally via `run.ps1`) and **analytical architectural estimates** (which require downstream physical/STA/power EDA flows):
+
+| Metric | Reported Value | Status & Evidence Source | Additional Evidence Required for Tapeout / Signoff |
+| :--- | :--- | :--- | :--- |
+| **Workload Cycle Counts** | `34 cycles` (Self-Attention)<br>`70 cycles` (Vision Classifier) | **Measured** (`vvp` RTL simulation cycle counter) | Verified against cycle-accurate golden reference |
+| **Zero-Skip & Ternary Events** | `276` skips (Attention)<br>`567` skips, `233` ternary ops (Vision) | **Measured** (hardware `skip_flags` & `bypass_flags` counters) | Verified in `tb/tb_ai_chip_top.v` |
+| **CMOS Logic & FF Count** | `4,778` Flip-Flops (`$_DFF*`)<br>`122,383` total CMOS cells | **Measured** (Yosys 0.71 `abc -g cmos2` mapping) | Standard-cell physical library mapping (OpenROAD) |
+| **FPGA LUT & FF Count** | `39,978` LUTs + `3,757` FFs + `32` `DSP48E1` | **Measured** (Yosys 0.71 `synth_xilinx -family xc7`) | Full Vivado place-and-route bitstream timing report |
+| **Maximum Clock Frequency** | `650 MHz` @ 28nm CMOS | **Analytical Estimate** (based on 1-stage 8-bit PE logic depth) | Post-layout Static Timing Analysis (OpenSTA / PrimeTime) |
+| **Silicon Die Area** | `~0.0075 mm²` @ 28nm CMOS | **Analytical Estimate** (gate-equivalent density model) | Standard-cell physical place & route (OpenROAD / Innovus) |
+| **Compute Energy Savings** | `~13×` lower MAC energy (Ternary) | **Analytical Estimate** (multiplier-bypass switching model) | Gate-level VCD toggle-rate power analysis (PrimeTime PX) |
 
 ---
 
-## Quick Start (Windows PowerShell)
+## Verification Demonstrations
+
+Running `powershell -ExecutionPolicy Bypass -File run.ps1` executes both workloads end-to-end over the `8N1` UART serial interface and synthesizes the RTL with Yosys.
+
+### 1. Transformer Self-Attention & Ternary Vision Simulation Output
+The testbench (`tb/tb_ai_chip_top.v`) streams compiled machine code and tensor matrices bit-by-bit into `rx_serial` and verifies every output value against Python golden models:
+
+```text
+=== [RUN 1] TRANSFORMER SELF-ATTENTION OUTPUT (UART-PROGRAMMED) ===
+Instructions Retired : 5 | Clock Cycles : 34 | Zero-Skips : 276
+  Attn Out Row 0 : [  127,    0, -127,  127 ]
+  Attn Out Row 1 : [    0,  127,  127,    0 ]
+  Attn Out Row 2 : [ -101,  126,  -76,  101 ]
+  Attn Out Row 3 : [  127, -127,    0,  127 ]
+RUN 1 STATUS         : PASS (100% Exact Match)
+
+=== [RUN 2] 1.58-BIT TERNARY VISION CLASSIFIER (UART READBACK) ===
+Instructions Retired : 8 | Clock Cycles : 70 | Zero-Skips : 567 | Ternary Ops : 233
+  UART Readback Image 0 -> Class 0 (Digit '0') | Expected Class 0
+  UART Readback Image 1 -> Class 1 (Digit '1') | Expected Class 1
+  UART Readback Image 2 -> Class 2 (Symbol 'X') | Expected Class 2
+  UART Readback Image 3 -> Class 3 (Symbol '+') | Expected Class 3
+RUN 2 STATUS         : PASS (100% Exact Match)
+```
+
+*
+![Simulation Output](docs/images/attention_sim.png)
+
+### 2. Systolic Array Wavefront Propagation (GTKWave)
+Every simulation dumps `build/chip_core.vcd`. Run `powershell -ExecutionPolicy Bypass -File view_waves.ps1` to open `tb/chip_core.gtkw` and inspect the diagonal activation/weight wavefronts, `skip_flags`, and UART serial framing.
+
+*
+![GTKWave Systolic Wavefront](docs/images/gtkwave_wavefront.png)
+
+### 3. Yosys Gate-Level Synthesis Statistics
+`synth/synth.ys` and `synth/synth_xilinx.ys` synthesize `ai_chip_top` into CMOS gates (`build/ai_chip_netlist.v`) and Xilinx 7-Series primitives (`build/yosys_xilinx.log`).
+
+*
+![Yosys Synthesis Statistics](docs/images/yosys_stats.png)
+
+---
+
+## Reproducing Locally (Windows PowerShell)
 
 ```powershell
-# 1. Run end-to-end compilation, bit-level UART simulation, and PPA report
+# 1. Run ISA compilation, bit-level UART RTL simulation, Yosys synthesis & PPA report
 powershell -ExecutionPolicy Bypass -File run.ps1
 
-# 2. (Optional) Install Yosys for real CMOS gate-level netlist synthesis
-powershell -ExecutionPolicy Bypass -File synth/install_yosys.ps1
-
-# 3. Publish repository to GitHub (requires GitHub CLI `gh`)
-powershell -ExecutionPolicy Bypass -File publish_github.ps1
+# 2. Open pre-configured GTKWave waveform view
+powershell -ExecutionPolicy Bypass -File view_waves.ps1
 ```
 
 ---
 
-## Silicon PPA Summary (`ai_chip_top` v7.0)
+## AI-Assisted Development Disclosure
 
-| Metric | Value |
-| :--- | :--- |
-| **Total Sequential Registers** | `4,741` flip-flops |
-| **Logic Gate Count** | `14,990` NAND2-equivalent gates |
-| **Xilinx Artix-7 Footprint** | `~6,245` 6-LUTs (`<25%` of Digilent Arty A7-35T) |
-| **Estimated Silicon Area** | `0.0075 mm²` @ 28nm CMOS (`333.1 µm²` @ 4nm) |
-| **Target Clock Frequency** | `650 MHz` @ 28nm CMOS |
+This project was developed using an AI-assisted engineering workflow. AI tools were used for architecture exploration, RTL generation, Python tooling, testbench development, debugging, and automation. Hardware simulation (`Icarus Verilog`) and gate-level synthesis (`Yosys`) were executed locally on Windows. The project author directed the architecture milestones, executed all verification workflows, diagnosed environment issues, and evaluated the resulting hardware outputs.

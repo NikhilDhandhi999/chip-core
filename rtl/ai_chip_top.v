@@ -1,5 +1,5 @@
 // rtl/ai_chip_top.v
-// Top-Level SoC with Integrated UART Serial Host Bridge (chip-core v7.0)
+// Top-Level SoC with Integrated UART Serial Host Bridge (chip-core v7.2)
 
 module ai_chip_top #(
     parameter integer CLKS_PER_BIT = 4

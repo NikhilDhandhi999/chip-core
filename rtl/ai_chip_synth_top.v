@@ -1,5 +1,5 @@
 // rtl/ai_chip_synth_top.v
-// Unified Programmable AI Processor SoC Core (chip-core v7.0)
+// Unified Programmable AI Processor SoC Core (chip-core v7.2)
 // Pure Synthesizable RTL — Zero simulation-only constructs.
 
 module ai_chip_synth_top (

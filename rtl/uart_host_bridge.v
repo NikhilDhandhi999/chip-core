@@ -1,5 +1,5 @@
 // rtl/uart_host_bridge.v
-// UART Host Serial Bridge & Packet Controller for chip-core (v7.0)
+// UART Host Serial Bridge & Packet Controller for chip-core (v7.2)
 
 module uart_host_bridge #(
     parameter integer CLKS_PER_BIT = 4

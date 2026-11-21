@@ -1,1 +1,1 @@
-v7.0 - Open-Source Gate-Level Synthesis (Yosys) + Post-Synthesis Verification + GitHub Release Package
+v7.2 - Exact Yosys 0.71 Cell/LUT Parser + Full-Range Attention Output + Verified PPA Table

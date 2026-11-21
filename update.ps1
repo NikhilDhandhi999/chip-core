@@ -1,5 +1,4 @@
-# update.ps1 - Run right inside C:\Users\nikhi\chip-core to pull the newest
-# chip-core*.zip from Downloads, overwrite files in-place, and run the simulation!
+# update.ps1 - Pull newest chip-core*.zip from Downloads, overwrite in-place, and run!
 $ErrorActionPreference = "Stop"
 
 $latestZip = Get-ChildItem "$HOME\Downloads\chip-core*.zip" -ErrorAction SilentlyContinue |

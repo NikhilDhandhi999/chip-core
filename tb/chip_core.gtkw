@@ -1,0 +1,29 @@
+[*]
+[*] GTKWave Analyzer Savefile for chip-core v7.2
+[*]
+[dumpfile] "build/chip_core.vcd"
+[savefile] "tb/chip_core.gtkw"
+[timestart] 0
+[size] 1440 850
+*-16.000000 0 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1
+[treeopen] tb_ai_chip_top.
+[treeopen] tb_ai_chip_top.dut.
+[treeopen] tb_ai_chip_top.dut.u_core.
+@28
+tb_ai_chip_top.clk
+tb_ai_chip_top.rst
+tb_ai_chip_top.rx_serial
+tb_ai_chip_top.tx_serial
+tb_ai_chip_top.core_done
+@22
+tb_ai_chip_top.dut.u_core.pc[4:0]
+tb_ai_chip_top.dut.u_core.ir[31:0]
+tb_ai_chip_top.dut.u_core.state[2:0]
+tb_ai_chip_top.dut.u_core.act_rows_flat[31:0]
+tb_ai_chip_top.dut.u_core.wgt_cols_flat[31:0]
+tb_ai_chip_top.dut.u_core.skip_flags[15:0]
+tb_ai_chip_top.dut.u_core.bypass_flags[15:0]
+tb_ai_chip_top.dut.u_core.acc_flat[511:0]
+tb_ai_chip_top.dut.u_core.result_int8_flat[127:0]
+[pattern_trace] 1
+[pattern_trace] 0

@@ -1,28 +1,7 @@
-# publish_github.ps1 - Initializes Git & publishes chip-core to GitHub via GitHub CLI (`gh`)
+# publish_github.ps1 - Commits and pushes updates to NikhilDhandhi999/chip-core
 $ErrorActionPreference = "Stop"
 
-if (-not (Get-Command "git" -ErrorAction SilentlyContinue)) {
-    Write-Host "ERROR: git not found in PATH." -ForegroundColor Red
-    exit 1
-}
-
-if (-not (Test-Path ".git")) {
-    git init -b main
-}
-
 git add .
-git commit -m "Release chip-core v7.0: Programmable 1.58-Bit Ternary & Transformer AI SoC with UART Host Bridge"
-
-if (Get-Command "gh" -ErrorAction SilentlyContinue) {
-    $repoExists = gh repo view NikhilDhandhi999/chip-core 2>$null
-    if (-not $repoExists) {
-        Write-Host "Creating public GitHub repository NikhilDhandhi999/chip-core..." -ForegroundColor Cyan
-        gh repo create NikhilDhandhi999/chip-core --public --source=. --remote=origin --push --description "Custom 1.58-Bit Ternary & Transformer Self-Attention AI Accelerator SoC in Synthesizable Verilog RTL"
-    } else {
-        Write-Host "Pushing updates to NikhilDhandhi999/chip-core..." -ForegroundColor Cyan
-        git push -u origin main
-    }
-    Write-Host "Published! View at: https://github.com/NikhilDhandhi999/chip-core" -ForegroundColor Green
-} else {
-    Write-Host "Git commit created! Install GitHub CLI (`gh`) or add a remote URL to push." -ForegroundColor Yellow
-}
+git commit -m "Update chip-core v7.2: Evidence-separated PPA report, dual-workload regression, and AI disclosure"
+git push -u origin main
+Write-Host "Published! View at: https://github.com/NikhilDhandhi999/chip-core" -ForegroundColor Green

@@ -1,5 +1,5 @@
 ## synth/chip_core_fpga.xdc
-## Xilinx Artix-7 (Digilent Arty A7-35T) Pin & 100 MHz Clock Constraints for UART SoC v7.0
+## Xilinx Artix-7 (Digilent Arty A7-35T) Pin & 100 MHz Clock Constraints for UART SoC v7.2
 
 set_property -dict { PACKAGE_PIN E3    IOSTANDARD LVCMOS33 } [get_ports { clk }];
 create_clock -add -name sys_clk_pin -period 10.00 -waveform {0 5} [get_ports { clk }];
